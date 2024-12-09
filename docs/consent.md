@@ -28,9 +28,10 @@ In order to generate the privacy preserving hashes in the consent module, you
 need to pick one attribute that is always available and that is unique to all
 users. An example of such an attribute is uid or eduPersonPrincipalName.
 
-If the attribute defined above is not available for a user, an error message
-will be shown, and the user will not be allowed through the filter. So make
-sure that you select an attribute that is available to all users.
+If the attribute defined above is not available for a user, the consent form
+will be available without 'remember' option and the consent will not be saved.
+To store the consents make sure that you select an attribute that is available
+to all users and related services.
 
 Add the filter to your Identity Provider hosted metadata authproc filters
 list, specifying the attribute you've selected.
@@ -60,7 +61,7 @@ Example:
 90 => [
     'class'                => 'consent:Consent',
     'identifyingAttribute' => 'uid',
-    'store'                => 'consent:Cookie', 
+    'store'                => 'consent:Cookie',
 ],
 ```
 
@@ -130,7 +131,7 @@ Example config using PostgreSQL database:
     'class' => 'consent:Consent',
     'identifyingAttribute' => 'uid',
     'store' => [
-        'consent:Database', 
+        'consent:Database',
         'dsn' => 'pgsql:host=sql.example.org;dbname=consent',
         'username' => 'simplesaml',
         'password' => 'sdfsdf',
@@ -145,7 +146,7 @@ Example config using MySQL database:
     'class' => 'consent:Consent',
     'identifyingAttribute' => 'uid',
     'store' => [
-        'consent:Database', 
+        'consent:Database',
         'dsn' => 'mysql:host=db.example.org;dbname=simplesaml',
         'username' => 'simplesaml',
         'password' => 'sdfsdf',

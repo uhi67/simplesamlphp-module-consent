@@ -18,9 +18,12 @@ use SAML2\Constants;
 use SimpleSAML\Assert\Assert;
 use SimpleSAML\Auth;
 use SimpleSAML\Error;
+use SimpleSAML\Error\MetadataNotFound;
 use SimpleSAML\Logger;
+use SimpleSAML\Metadata\MetaDataStorageHandler;
 use SimpleSAML\Module;
 use SimpleSAML\Module\consent\Store;
+use SimpleSAML\Module\saml\Error\NoPassive;
 use SimpleSAML\Stats;
 use SimpleSAML\Utils;
 
@@ -50,7 +53,7 @@ class Consent extends Auth\ProcessingFilter
     /**
      * Consent backend storage configuration
      *
-     * @var \SimpleSAML\Module\consent\Store|null
+     * @var Store|null
      */
     private ?Store $store = null;
 
@@ -91,7 +94,7 @@ class Consent extends Auth\ProcessingFilter
      * @param array $config Configuration information.
      * @param mixed $reserved For future use.
      *
-     * @throws \SimpleSAML\Error\Exception if the configuration is not valid.
+     * @throws Error\Exception if the configuration is not valid.
      */
     public function __construct(array $config, $reserved)
     {
@@ -149,7 +152,7 @@ class Consent extends Auth\ProcessingFilter
 
         if (array_key_exists('store', $config)) {
             try {
-                $this->store = \SimpleSAML\Module\consent\Store::parseStoreConfig($config['store']);
+                $this->store = Store::parseStoreConfig($config['store']);
             } catch (Exception $e) {
                 Logger::error(
                     'Consent: Could not create consent storage: ' .
@@ -236,7 +239,7 @@ class Consent extends Auth\ProcessingFilter
 
 
     /**
-     * Process a authentication response
+     * Process an authentication response
      *
      * This function saves the state, and redirects the user to the page where the user can authorize the release of
      * the attributes. If storage is used and the consent has already been given the user is passed on.
@@ -244,7 +247,8 @@ class Consent extends Auth\ProcessingFilter
      * @param array &$state The state of the response.
      *
      *
-     * @throws \SimpleSAML\Module\saml\Error\NoPassive if the request was passive and consent is needed.
+     * @throws MetadataNotFound
+     * @throws NoPassive if the request was passive and consent is needed.
      */
     public function process(array &$state): void
     {
@@ -257,7 +261,7 @@ class Consent extends Auth\ProcessingFilter
         $spEntityId = $state['Destination']['entityid'];
         $idpEntityId = $state['Source']['entityid'];
 
-        $metadata = \SimpleSAML\Metadata\MetaDataStorageHandler::getMetadataHandler();
+        $metadata = MetaDataStorageHandler::getMetadataHandler();
 
         /**
          * If the consent module is active on a bridge $state['saml:sp:IdP']
@@ -293,62 +297,64 @@ class Consent extends Auth\ProcessingFilter
 
         if ($this->store !== null) {
             $attributes = $state['Attributes'];
-            Assert::keyExists(
-                $attributes,
-                $this->identifyingAttribute,
-                "Consent: Missing '" . $this->identifyingAttribute . "' in user's attributes.",
-            );
-
-            $source = $state['Source']['metadata-set'] . '|' . $idpEntityId;
-            $destination = $state['Destination']['metadata-set'] . '|' . $spEntityId;
-
-            Assert::keyExists(
-                $attributes,
-                $this->identifyingAttribute,
-                sprintf("Consent: No attribute '%s' was found in the user's attributes.", $this->identifyingAttribute),
-            );
-
-            $userId = $attributes[$this->identifyingAttribute][0];
-            Assert::stringNotEmpty($userId);
-
-            // Remove attributes that do not require consent
-            foreach ($attributes as $attrkey => $attrval) {
-                if (in_array($attrkey, $this->noconsentattributes, true)) {
-                    unset($attributes[$attrkey]);
-                }
+            if(!array_key_exists($this->identifyingAttribute, $attributes)) {
+                Logger::notice("Consent: Missing '" . $this->identifyingAttribute . "' in user's attributes. Consent will not be stored.");
+//                Logger::debug('Consent: state: ' . json_encode($state, JSON_PRETTY_PRINT));
+                $this->store = null;
             }
+            else {
 
-            Logger::debug('Consent: userid: ' . $userId);
-            Logger::debug('Consent: source: ' . $source);
-            Logger::debug('Consent: destination: ' . $destination);
+                Assert::keyExists(
+                    $attributes,
+                    $this->identifyingAttribute,
+                    "Consent: Missing '" . $this->identifyingAttribute . "' in user's attributes.",
+                );
 
-            $hashedUserId = self::getHashedUserID($userId, $source);
-            $targetedId = self::getTargetedID($userId, $source, $destination);
-            $attributeSet = self::getAttributeHash($attributes, $this->includeValues);
+                $source = $state['Source']['metadata-set'] . '|' . $idpEntityId;
+                $destination = $state['Destination']['metadata-set'] . '|' . $spEntityId;
 
-            Logger::debug(
-                'Consent: hasConsent() [' . $hashedUserId . '|' . $targetedId . '|' . $attributeSet . ']',
-            );
+                $userId = $attributes[$this->identifyingAttribute][0];
+                Assert::stringNotEmpty($userId);
 
-            try {
-                if ($this->store->hasConsent($hashedUserId, $targetedId, $attributeSet)) {
-                    // Consent already given
-                    Logger::stats('consent found');
-                    Stats::log('consent:found', $statsData);
-                    return;
+                // Remove attributes that do not require consent
+                foreach ($attributes as $attrkey => $attrval) {
+                    if (in_array($attrkey, $this->noconsentattributes, true)) {
+                        unset($attributes[$attrkey]);
+                    }
                 }
 
-                Logger::stats('consent notfound');
-                Stats::log('consent:notfound', $statsData);
+                Logger::debug('Consent: userid: ' . $userId);
+                Logger::debug('Consent: source: ' . $source);
+                Logger::debug('Consent: destination: ' . $destination);
 
-                $state['consent:store'] = $this->store;
-                $state['consent:store.userId'] = $hashedUserId;
-                $state['consent:store.destination'] = $targetedId;
-                $state['consent:store.attributeSet'] = $attributeSet;
-            } catch (\Exception $e) {
-                Logger::error('Consent: Error reading from storage: ' . $e->getMessage());
-                Logger::stats('Consent failed');
-                Stats::log('consent:failed', $statsData);
+                $hashedUserId = self::getHashedUserID($userId, $source);
+                $targetedId = self::getTargetedID($userId, $source, $destination);
+                $attributeSet = self::getAttributeHash($attributes, $this->includeValues);
+
+                Logger::debug(
+                    'Consent: hasConsent() [' . $hashedUserId . '|' . $targetedId . '|' . $attributeSet . ']',
+                );
+
+                try {
+                    if ($this->store->hasConsent($hashedUserId, $targetedId, $attributeSet)) {
+                        // Consent already given
+                        Logger::stats('consent found');
+                        Stats::log('consent:found', $statsData);
+                        return;
+                    }
+
+                    Logger::stats('consent notfound');
+                    Stats::log('consent:notfound', $statsData);
+
+                    $state['consent:store'] = $this->store;
+                    $state['consent:store.userId'] = $hashedUserId;
+                    $state['consent:store.destination'] = $targetedId;
+                    $state['consent:store.attributeSet'] = $attributeSet;
+                } catch (Exception $e) {
+                    Logger::error('Consent: Error reading from storage: ' . $e->getMessage());
+                    Logger::stats('Consent failed');
+                    Stats::log('consent:failed', $statsData);
+                }
             }
         } else {
             Logger::stats('consent nostorage');
