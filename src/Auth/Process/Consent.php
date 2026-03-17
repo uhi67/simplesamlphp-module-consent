@@ -14,7 +14,6 @@ declare(strict_types=1);
 namespace SimpleSAML\Module\consent\Auth\Process;
 
 use Exception;
-use SAML2\Constants;
 use SimpleSAML\Assert\Assert;
 use SimpleSAML\Auth;
 use SimpleSAML\Error;
@@ -23,6 +22,7 @@ use SimpleSAML\Logger;
 use SimpleSAML\Metadata\MetaDataStorageHandler;
 use SimpleSAML\Module;
 use SimpleSAML\Module\consent\Store;
+use SimpleSAML\SAML2\Constants;
 use SimpleSAML\Module\saml\Error\NoPassive;
 use SimpleSAML\Stats;
 use SimpleSAML\Utils;
